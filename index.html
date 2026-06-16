@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>贪吃蛇</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { width: 100%; height: 100%; overflow: hidden; touch-action: manipulation; }
+body { background: #0a0a0a; display: flex; justify-content: center; align-items: center; height: 100vh; height: 100dvh;
+       font-family: "Microsoft YaHei","PingFang SC",sans-serif; user-select: none; -webkit-user-select: none; }
+#container { display: flex; gap: 10px; padding: 10px; align-items: flex-start; }
+canvas { display: block; border: 1px solid #333; max-width: 100%; height: auto; touch-action: none; }
+#panel { width: 195px; min-width: 195px; background: #0a0a0a; display: flex; flex-direction: column; padding: 20px 12px; gap: 10px; color: #fff; }
+#panel .title { font-size: 20px; font-weight: bold; text-align: center; margin-bottom: 8px; }
+#panel .info { font-family: "Consolas","Microsoft YaHei",monospace; font-size: 13px; padding: 2px 0; }
+#panel .score { color: #00ff88; }
+#panel .speed { color: #ffaa00; }
+#panel .progress { color: #777; font-size: 11px; }
+#panel .boost { color: #ff6600; font-weight: bold; min-height: 16px; }
+#panel .combo { color: #ffaa00; font-weight: bold; min-height: 16px; }
+#panel .lives { color: #44aaff; }
+#panel .inv { color: #cc44ff; min-height: 16px; }
+#panel .skin-info { color: #888; font-size: 10px; }
+
+/* Rotation Hint Overlay */
+#rotate-hint { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); z-index: 200; flex-direction: column; align-items: center; justify-content: center; }
+#rotate-hint .rotate-icon { font-size: 72px; margin-bottom: 24px; animation: rotate-phone 2s ease-in-out infinite; }
+@keyframes rotate-phone { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(90deg); } }
+#rotate-hint .rotate-text { color: #fff; font-size: 22px; font-family: "Microsoft YaHei","PingFang SC",sans-serif; text-align: center; line-height: 1.6; }
+#rotate-hint .rotate-subtext { color: #777; font-size: 13px; margin-top: 12px; }
+
+/* Mobile Landscape -- optimized for horizontal play, panel stays right */
+@media (max-width: 960px) and (orientation: landscape) {
+    #container { flex-direction: row; align-items: center; padding: 5px; gap: 8px; height: 100dvh; }
+    #panel { width: 140px; min-width: 140px; padding: 6px 6px; gap: 3px; }
+    #panel .title { font-size: 14px; margin-bottom: 2px; }
+    #panel .info { font-size: 10px; padding: 1px 0; }
+    #panel .progress, #panel .boost, #panel .combo, #panel .inv, #panel .skin-info { display: none; }
+    canvas { height: calc(100dvh - 10px); width: auto; max-width: calc(100vw - 160px); }
+}
+
+/* Mobile Portrait -- show rotation hint overlay */
+@media (max-width: 960px) and (orientation: portrait) {
+    #container { flex-direction: column; align-items: center; padding: 5px; gap: 5px; }
+    #panel { width: 100%; min-width: auto; flex-direction: row; flex-wrap: wrap; padding: 8px 10px; gap: 6px; justify-content: center; align-items: center; }
+    #panel .title { font-size: 16px; margin-bottom: 0; margin-right: 10px; }
+    #panel .info { font-size: 11px; padding: 1px 4px; }
+    #panel .boost, #panel .combo, #panel .inv, #panel .skin-info { display: none; }
+    #panel .progress { font-size: 10px; }
+    canvas { max-width: calc(100vw - 10px); height: auto; }
+    #rotate-hint { display: flex; }
+}
+</style>
+</head>
+<body>
+<div id="container">
+    <canvas id="game"></canvas>
+    <div id="panel">
+        <div class="title">贪吃蛇</div>
+        <div class="info score" id="score">分数: 0</div>
+        <div class="info speed" id="speed">速度: 等级 1</div>
+        <div class="info progress" id="progress">进度: [░░░] 0/3</div>
+        <div class="info boost" id="boost"></div>
+        <div class="info combo" id="combo"></div>
+        <div class="info lives" id="lives"></div>
+        <div class="info inv" id="inv"></div>
+        <div class="info skin-info" id="skinInfo">皮肤: 经典绿</div>
+    </div>
+</div>
+
+<div id="rotate-hint">
+    <div class="rotate-icon">📱</div>
+    <div class="rotate-text">请旋转手机</div>
+    <div class="rotate-subtext">横屏体验更佳</div>
+</div>
+
+<script>
+// ============================ CONSTANTS ============================
+const CELL=30, COLS=25, ROWS=20, CW=COLS*CELL, CH=ROWS*CELL;
+const BASE_SPEED=180, MIN_SPEED=70, SPEED_STEP=5, FOODS_PER_LEVEL=3, INITIAL_MARGIN=5, INVINCIBLE_SECS=5;
+const BG="#FFF8E7", GRID="#E8E4D8", OVERLAY="#FFF8E7", MENU_BG="#080808", TEXT="#ffffff", SUBTEXT="#888888";
+const BTN_BG="#1a3a1a", BTN_HOVER="#2a6a2a", BTN_BD="#3a6a3a", BTN_BD_H="#4a8a4a";
+const FOOD_COLORS={normal:"#ff3366",big:"#ffd700",shield:"#44aaff",star:"#cc44ff"};
+const GLOW_COLORS={normal:"#ff8899",big:"#ffcc44",shield:"#88ccff",star:"#dd88ff"};
+const SKINS={
+    "经典绿":{head:"#00cc44",tail:"#006622",accent:"#00ff88"},
+    "烈焰红":{head:"#ff4422",tail:"#991100",accent:"#ff6644"},
+    "冰霜蓝":{head:"#44ccff",tail:"#115588",accent:"#44ccff"},
+    "霓虹紫":{head:"#ff44ff",tail:"#880088",accent:"#ff66ff"},
+    "暗金":  {head:"#ffd700",tail:"#886600",accent:"#ffd700"},
+};
+
+const canvas=document.getElementById('game'); canvas.width=CW; canvas.height=CH;
+const ctx=canvas.getContext('2d');
+
+// ============================ AUDIO ============================
+let audioCtx=null, sounds={}, bgmNode=null, bgmResumeId=null, soundOn=true;
+
+function initAudio(){ if(audioCtx)return; audioCtx=new(window.AudioContext||window.webkitAudioContext)(); sounds=generateSounds(); }
+function midiToFreq(n){ return 440*Math.pow(2,(n-69)/12); }
+
+function createBuffer(dur,sr,gen){
+    const n=Math.floor(sr*dur), buf=audioCtx.createBuffer(1,n,sr), d=buf.getChannelData(0);
+    for(let i=0;i<n;i++){ let v=gen(i/sr); d[i]=Math.max(-0.95,Math.min(0.95,v)); }
+    return buf;
+}
+function generateSounds(){
+    const sr=11025,s={};
+    s.eat=createBuffer(0.10,sr,t=>{ let d=0.10,f=440+440*(t/d); return Math.max(0,1-t/d)*0.55*Math.sin(2*Math.PI*f*t); });
+    s.shield=createBuffer(0.15,sr,t=>{ let d=0.15,f=520+360*(t/d),e=Math.max(0,1-t/d); return e*0.45*Math.sin(2*Math.PI*f*t)+e*0.15*Math.sin(2*Math.PI*f*1.5*t); });
+    s.star=createBuffer(0.20,sr,t=>{ let d=0.20,n=[60,64,67,72,76],nd=d/5,i=Math.min(Math.floor(t/nd),4),f=midiToFreq(n[i]),e=Math.max(0,1-(t%nd)/nd*0.7); return e*0.4*Math.sin(2*Math.PI*f*t)+e*0.2*Math.sin(2*Math.PI*f*2*t); });
+    s.die=createBuffer(0.50,sr,t=>{ let d=0.50,f=400-250*(t/d),e=Math.max(0,1-t/d); return e*0.4*Math.sin(2*Math.PI*f*t)+e*0.25*(Math.random()*2-1); });
+    s.levelup=createBuffer(0.35,sr,t=>{ let d=0.35,n=[523,659,784,1047],nd=d/4,i=Math.min(Math.floor(t/nd),3),f=n[i],lt=t%nd; return Math.max(0,1-lt/nd*0.6)*0.45*Math.sin(2*Math.PI*f*t); });
+    s.turn=createBuffer(0.06,sr,t=>{ let d=0.06,f=600+200*(t/d),e=Math.max(0,1-t/d); return e*0.25*Math.sin(2*Math.PI*f*t)+(Math.random()*2-1)*0.3*e*e; });
+    s.bgm=createBuffer(4.05,sr,t=>{ let bpm=120,beat=60/bpm,mel=[60,0,0.8,64,1,0.4,67,1.5,0.4,72,2,0.8,71,3,0.4,72,3.5,0.4,67,4,0.8,64,5,0.8,62,6,0.8,64,7,0.4,67,7.5,0.4],bas=[48,0,4,48,4,4],melV=0,basV=0;
+        for(let j=0;j<mel.length;j+=3){ let s=mel[j+1]*beat,e=(mel[j+1]+mel[j+2])*beat; if(s<=t&&t<e){ let f=midiToFreq(mel[j]),lt=t-s,env=1; if(lt<0.015)env=lt/0.015; if(lt>mel[j+2]*beat-0.02)env=Math.max(0,(mel[j+2]*beat-lt)/0.02); let ph=lt*f; melV=env*(((ph%1)<0.25)?0.15:-0.15); break; } }
+        for(let j=0;j<bas.length;j+=3){ let s=bas[j+1]*beat,e=(bas[j+1]+bas[j+2])*beat; if(s<=t&&t<e){ let f=midiToFreq(bas[j]),ph=(t-s)*f; basV=0.10*(2*Math.abs(2*(ph-Math.floor(ph+0.5)))-1); break; } }
+        return melV+basV; });
+    return s;
+}
+function playBuffer(buf){ if(!audioCtx||!soundOn)return; let s=audioCtx.createBufferSource(); s.buffer=buf; s.connect(audioCtx.destination); s.start(0); }
+function playSFX(name){
+    if(!audioCtx||!soundOn)return; let buf=sounds[name]; if(!buf)return;
+    if(bgmNode)stopBGM(); playBuffer(buf);
+    if(bgmNode){ if(bgmResumeId)clearTimeout(bgmResumeId); bgmResumeId=setTimeout(resumeBGM,250); }
+}
+function startBGM(){ if(!audioCtx||!soundOn||bgmNode)return; let s=audioCtx.createBufferSource(); s.buffer=sounds.bgm; s.loop=true; s.connect(audioCtx.destination); s.start(0); bgmNode=s; }
+function resumeBGM(){ bgmResumeId=null; if(!soundOn||!bgmNode)return; startBGM(); }
+function stopBGM(){ if(bgmResumeId){ clearTimeout(bgmResumeId); bgmResumeId=null; } if(bgmNode){ try{bgmNode.stop();}catch(e){} bgmNode=null; } }
+
+// ============================ HISTORY ============================
+function loadHistory(){ try{ let d=localStorage.getItem('snake_scores'); return d?JSON.parse(d):[]; }catch(e){ return []; } }
+function saveHistoryDirect(h){ localStorage.setItem('snake_scores',JSON.stringify(h)); }
+function saveScore(score,level,nickname){
+    let h=loadHistory(), now=new Date();
+    let date=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    h.push({player:nickname||"玩家",score,level,date}); h.sort((a,b)=>b.score-a.score);
+    localStorage.setItem('snake_scores',JSON.stringify(h.slice(0,10)));
+}
+
+// ============================ GAME STATE ============================
+let state='menu', snake, dir, nextDir, dirQueue, score, eaten, speed, boost, lives, invincibleUntil, foodMargin;
+let foods, maxFoods, combo, lastEatTime, enemy, enemyDir, enemyTick, obstacles, shakeUntil;
+let paused, countdown, countdownTimer, skin, nickname;
+let particles=[], popups=[], trail=[], buttons=[], hovered=null;
+let lastTick=0;
+
+function initData(){
+    let cx=Math.floor(COLS/2), cy=Math.floor(ROWS/2);
+    snake=[[cx-2,cy],[cx-1,cy],[cx,cy]]; dir=[1,0]; nextDir=[1,0]; dirQueue=[];
+    score=0; eaten=0; speed=BASE_SPEED; boost=false; lives=0; invincibleUntil=0; foodMargin=INITIAL_MARGIN;
+    foods=[]; maxFoods=3; combo=0; lastEatTime=0; enemy=[]; enemyDir=[0,1]; enemyTick=0; obstacles=new Set();
+    shakeUntil=0; paused=false; countdown=-1; countdownTimer=0;
+    particles=[]; popups=[]; trail=[];
+}
+
+function skinColors(){ let s=SKINS[skin]||SKINS["经典绿"]; return [s.head,s.tail,s.accent]; }
+
+function placeOneFood(){
+    let m=foodMargin, occupied=new Set([...snake.map(p=>p[0]+','+p[1]),...enemy.map(p=>p[0]+','+p[1]),...obstacles]);
+    for(let f of foods) occupied.add(f[0]+','+f[1]);
+    let x,y; do{ x=Math.floor(Math.random()*(COLS-2*m))+m; y=Math.floor(Math.random()*(ROWS-2*m))+m; }while(occupied.has(x+','+y));
+    let r=Math.random(), type;
+    if(r<0.05)type='star'; else if(r<0.15)type='shield'; else if(r<0.30)type='big'; else type='normal';
+    return [x,y,type];
+}
+function ensureFoods(){ while(foods.length<maxFoods) foods.push(placeOneFood()); }
+function speedLevel(){ return Math.floor((BASE_SPEED-speed)/SPEED_STEP)+1; }
+function syncInfo(){
+    document.getElementById('score').textContent=`分数: ${score}`;
+    document.getElementById('speed').textContent=`速度: 等级 ${speedLevel()}`;
+    let prog=eaten%FOODS_PER_LEVEL;
+    document.getElementById('progress').textContent=`进度: [${'█'.repeat(prog)}${'░'.repeat(FOODS_PER_LEVEL-prog)}] ${prog}/${FOODS_PER_LEVEL}`;
+    document.getElementById('boost').textContent=(boost&&state==='play')?'加速中!':'';
+    document.getElementById('combo').textContent=combo>=2?`连击 x${combo}!`:'';
+    document.getElementById('lives').textContent=lives>0?`生命: ${'♥'.repeat(lives)}`:'';
+    if(state==='play'&&Date.now()/1000<invincibleUntil) document.getElementById('inv').textContent=`无敌: ${Math.ceil(invincibleUntil-Date.now()/1000)}秒`;
+    else document.getElementById('inv').textContent='';
+    document.getElementById('skinInfo').textContent=`皮肤: ${skin}`;
+}
+
+// ============================ INPUT ============================
+const keyDir={arrowup:[0,-1],arrowdown:[0,1],arrowleft:[-1,0],arrowright:[1,0],w:[0,-1],s:[0,1],a:[-1,0],d:[1,0]};
+function steer(key){ let k=key.toLowerCase(), nd=keyDir[k]; if(!nd)return; if(nd[0]+dir[0]===0&&nd[1]+dir[1]===0)return; if(dirQueue.length>0&&dirQueue[dirQueue.length-1][0]===nd[0]&&dirQueue[dirQueue.length-1][1]===nd[1])return; if(dirQueue.length<2)dirQueue.push(nd); }
+
+document.addEventListener('keydown',e=>{
+    initAudio(); let k=e.key.toLowerCase();
+    if(k==='m'){ soundOn=!soundOn; if(soundOn&&state==='menu')startBGM(); else{stopBGM();bgmNode=null;} return; }
+    if(state==='countdown')return;
+    if(state==='play'){
+        if(k==='p'){ paused=!paused; if(paused)stopBGM(); else startBGM(); draw(); return; }
+        if(k==='r'){ startGame(); return; } if(k==='q'){ window.close(); return; }
+        if(paused)return; if(k===' '){ e.preventDefault(); boost=true; spaceHeld=true; return; }
+        steer(e.key);
+    }else if(state==='over'){ if(k==='r')startGame(); if(k==='q')window.close(); }
+    else if(state==='rules'||state==='history'||state==='skins'){ if(k==='escape')goMenu(); }
+    else if(state==='menu'){ if(k==='escape')window.close(); }
+});
+document.addEventListener('keyup',e=>{ if(e.key===' '){ boost=false; spaceHeld=false; } });
+
+// ============================ MOBILE TOUCH CONTROLS ============================
+let touchStartPos=null, touchStartTime=0, touchWasSwipe=false, longPressTimer=null, isBoostFromTouch=false, lastSteerPos=null, spaceHeld=false;
+
+// Touch: long-press boost + continuous swipe steering
+canvas.addEventListener('touchstart',e=>{
+    initAudio(); touchWasSwipe=false;
+    if(e.touches.length===1){
+        touchStartPos={x:e.touches[0].clientX, y:e.touches[0].clientY};
+        lastSteerPos={x:touchStartPos.x, y:touchStartPos.y};
+        if(longPressTimer)clearTimeout(longPressTimer);
+        longPressTimer=setTimeout(()=>{ if(state==='play'&&!paused){ boost=true; isBoostFromTouch=true; } },200);
+    }
+},{passive:false});
+
+canvas.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    if(!touchStartPos||e.touches.length!==1)return;
+    let dx=e.touches[0].clientX-touchStartPos.x, dy=e.touches[0].clientY-touchStartPos.y;
+    if(Math.abs(dx)>10||Math.abs(dy)>10){ if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; } touchWasSwipe=true; }
+    if(state==='play'&&!paused){
+        let sdx=e.touches[0].clientX-lastSteerPos.x, sdy=e.touches[0].clientY-lastSteerPos.y;
+        if(Math.abs(sdx)>20||Math.abs(sdy)>20){
+            if(Math.abs(sdx)>Math.abs(sdy))steer(sdx>0?'ArrowRight':'ArrowLeft');
+            else steer(sdy>0?'ArrowDown':'ArrowUp');
+            lastSteerPos={x:e.touches[0].clientX, y:e.touches[0].clientY};
+        }
+    }
+},{passive:false});
+
+canvas.addEventListener('touchend',e=>{
+    if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; }
+    if(isBoostFromTouch&&!spaceHeld){ boost=false; isBoostFromTouch=false; }
+    touchStartPos=null; lastSteerPos=null;
+});
+
+canvas.addEventListener('touchcancel',e=>{
+    if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; }
+    if(isBoostFromTouch){ boost=false; isBoostFromTouch=false; }
+    touchStartPos=null; lastSteerPos=null;
+});
+
+// Canvas click (works for both mouse and touch)
+canvas.addEventListener('click',e=>{
+    initAudio();
+    if(touchWasSwipe){ touchWasSwipe=false; return; }
+    let rect=canvas.getBoundingClientRect();
+    let scaleX=CW/rect.width, scaleY=CH/rect.height;
+    let mx=(e.clientX-rect.left)*scaleX, my=(e.clientY-rect.top)*scaleY;
+    for(let btn of buttons){
+        if(mx>=btn.x1&&mx<=btn.x2&&my>=btn.y1&&my<=btn.y2){
+            if(btn.action==='start')startGame(); else if(btn.action==='rules')showRules();
+            else if(btn.action==='history')showHistory(); else if(btn.action==='skins')showSkins();
+            else if(btn.action==='nickname'){ let n=prompt('输入你的昵称:'); if(n&&n.trim())nickname=n.trim(); }
+            else if(btn.action.startsWith('del_')){ let idx=parseInt(btn.action.slice(4)); let h=loadHistory(); if(idx>=0&&idx<h.length){ h.splice(idx,1); saveHistoryDirect(h); } draw(); }
+            else if(btn.action.startsWith('skin_')){ skin=btn.action.slice(5); goMenu(); }
+            else if(btn.action==='quit')window.close(); else if(btn.action==='back')goMenu();
+            else if(btn.action==='restart')startGame(); else if(btn.action==='menu')goMenu();
+            return;
+        }
+    }
+    if(state==='rules'||state==='history'||state==='skins')goMenu();
+});
+canvas.addEventListener('mousemove',e=>{
+    let rect=canvas.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top, h=null;
+    let scaleX=CW/rect.width, scaleY=CH/rect.height;
+    mx*=scaleX; my*=scaleY;
+    for(let btn of buttons){ if(mx>=btn.x1&&mx<=btn.x2&&my>=btn.y1&&my<=btn.y2){ h=btn.action; break; } }
+    if(h!==hovered){ hovered=h; draw(); }
+});
+
+// ============================ ACTIONS ============================
+function startGame(){ stopBGM(); initData(); ensureFoods(); state='countdown'; countdown=3; countdownTimer=performance.now()/1000; syncInfo(); draw(); }
+function showRules(){ stopBGM(); state='rules'; draw(); }
+function showHistory(){ stopBGM(); state='history'; draw(); }
+function showSkins(){ stopBGM(); state='skins'; draw(); }
+function goMenu(){ stopBGM(); initData(); foods=[placeOneFood()]; state='menu'; syncInfo(); draw(); startBGM(); }
+
+// ============================ UPDATE ============================
+function update(){
+    let oldDir=dir.slice();
+    if(dirQueue.length>0) nextDir=dirQueue.shift();
+    dir=nextDir.slice();
+    if(dir[0]!==oldDir[0]||dir[1]!==oldDir[1]) playSFX('turn');
+
+    let hx=snake[snake.length-1][0], hy=snake[snake.length-1][1];
+    let nhx=hx+dir[0], nhy=hy+dir[1], inv=Date.now()/1000<invincibleUntil;
+
+    if(nhx<0||nhx>=COLS||nhy<0||nhy>=ROWS){ if(inv){ nhx=((nhx%COLS)+COLS)%COLS; nhy=((nhy%ROWS)+ROWS)%ROWS; } else { die(); return; } }
+    if(snake.some(s=>s[0]===nhx&&s[1]===nhy)){ if(!inv){ die(); return; } }
+    if(enemy.some(s=>s[0]===nhx&&s[1]===nhy)){ if(!inv){ die(); return; } }
+    if(obstacles.has(nhx+','+nhy)){ if(!inv){ die(); return; } }
+
+    snake.push([nhx,nhy]); trail.push([hx,hy]); if(trail.length>5) trail.shift();
+
+    // eat food
+    let eatenIdx=-1;
+    for(let i=0;i<foods.length;i++){ if(nhx===foods[i][0]&&nhy===foods[i][1]){ eatenIdx=i; break; } }
+    if(eatenIdx>=0){
+        let [fx,fy,ftype]=foods.splice(eatenIdx,1)[0]; eaten++; let prevLevel=speedLevel(), now=Date.now()/1000;
+        if(now-lastEatTime<1.5)combo++; else combo=1; lastEatTime=now; let mult=combo;
+
+        if(ftype==='normal'){ score+=10*mult; playSFX('eat'); spawnParticles(fx,fy,'#ff3366'); spawnPopup(fx,fy,'+'+10*mult,'#ff3366'); }
+        else if(ftype==='big'){ score+=30*mult; playSFX('eat'); spawnParticles(fx,fy,'#ffd700'); spawnPopup(fx,fy,'+'+30*mult,'#ffd700'); }
+        else if(ftype==='shield'){ lives++; playSFX('shield'); spawnParticles(fx,fy,'#44aaff'); spawnPopup(fx,fy,'护盾+1','#44aaff'); }
+        else if(ftype==='star'){ invincibleUntil=Date.now()/1000+INVINCIBLE_SECS; playSFX('star'); spawnParticles(fx,fy,'#cc44ff'); spawnPopup(fx,fy,'无敌!','#cc44ff'); }
+        if(combo>=3) spawnPopup(fx,fy,'COMBO x'+combo+'!','#ffaa00');
+
+        if(eaten%FOODS_PER_LEVEL===0){
+            if(speed>MIN_SPEED) speed=Math.max(MIN_SPEED,speed-SPEED_STEP);
+            if(foodMargin>1) foodMargin--;
+            if(speedLevel()>prevLevel) playSFX('levelup');
+            maxFoods=Math.min(6,3+Math.floor(speedLevel()/2));
+        }
+        ensureFoods();
+    }else{ snake.shift(); }
+
+    // enemy AI (every 2 ticks)
+    enemyTick++; if(enemyTick%2===0&&enemy.length>0) moveEnemy();
+
+    // obstacles
+    let lv=speedLevel();
+    if(lv>=3){ let count=lv*2; if(obstacles.size!==count) generateObstacles(count); }
+}
+
+function moveEnemy(){
+    if(enemy.length===0)return;
+    let [ehx,ehy]=enemy[enemy.length-1], dx, dy;
+    if(foods.length>0){
+        let closest=foods.reduce((a,b)=>Math.abs(a[0]-ehx)+Math.abs(a[1]-ehy)<Math.abs(b[0]-ehx)+Math.abs(b[1]-ehy)?a:b);
+        dx=closest[0]>ehx?1:(closest[0]<ehx?-1:0); dy=closest[1]>ehy?1:(closest[1]<ehy?-1:0);
+        if(dx!==0&&dy!==0){ if(Math.abs(closest[0]-ehx)>=Math.abs(closest[1]-ehy))dy=0; else dx=0; }
+        if(dx===0&&dy===0)[dx,dy]=enemyDir;
+    }else{ [dx,dy]=enemyDir; }
+
+    for(let [ndx,ndy] of [[dx,dy],[dy,dx],[-dy,-dx],[-dx,-dy],[1,0],[-1,0],[0,1],[0,-1]]){
+        let nx=ehx+ndx, ny=ehy+ndy;
+        if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS&&!enemy.some(s=>s[0]===nx&&s[1]===ny)&&!obstacles.has(nx+','+ny)){ enemyDir=[ndx,ndy]; break; }
+    }
+    let nhx=ehx+enemyDir[0], nhy=ehy+enemyDir[1];
+    if(nhx<0||nhx>=COLS||nhy<0||nhy>=ROWS)return;
+    if(enemy.some(s=>s[0]===nhx&&s[1]===nhy))return;
+    if(obstacles.has(nhx+','+nhy))return;
+    enemy.push([nhx,nhy]);
+    let ateIdx=-1;
+    for(let i=0;i<foods.length;i++){ if(nhx===foods[i][0]&&nhy===foods[i][1]){ ateIdx=i; break; } }
+    if(ateIdx>=0){ let f=foods.splice(ateIdx,1)[0]; spawnParticles(f[0],f[1],'#ff6600',6); ensureFoods(); }
+    else enemy.shift();
+    if(enemy.length===0)initEnemy();
+}
+function initEnemy(){
+    let x,y; do{ x=Math.floor(Math.random()*(COLS-10))+5; y=Math.floor(Math.random()*(ROWS-10))+5; }while(snake.some(s=>s[0]===x&&s[1]===y));
+    enemy=[[x-2,y],[x-1,y],[x,y]]; enemyDir=[1,0];
+}
+function generateObstacles(count){
+    obstacles.clear(); let occupied=new Set([...snake.map(p=>p[0]+','+p[1]),...enemy.map(p=>p[0]+','+p[1])]);
+    for(let f of foods) occupied.add(f[0]+','+f[1]);
+    for(let a=0;a<500&&obstacles.size<count;a++){
+        let x=Math.floor(Math.random()*(COLS-2))+1, y=Math.floor(Math.random()*(ROWS-2))+1;
+        if(!occupied.has(x+','+y)){ obstacles.add(x+','+y); occupied.add(x+','+y); }
+    }
+}
+function die(){
+    if(lives>0){ lives--; invincibleUntil=Date.now()/1000+1.5; }
+    else {
+        let [hx,hy]=snake[snake.length-1];
+        for(let i=0;i<3;i++) spawnParticles(hx,hy,'#ff3366',12);
+        state='over'; shakeUntil=performance.now()/1000+0.4; paused=false; combo=0;
+        stopBGM(); playSFX('die'); saveScore(score,speedLevel(),nickname);
+    }
+}
+
+// ============================ PARTICLES ============================
+function spawnParticles(gx,gy,color,count=20){
+    let cx=gx*CELL+CELL/2, cy=gy*CELL+CELL/2;
+    for(let i=0;i<count;i++){ let a=Math.random()*2*Math.PI, spd=60+Math.random()*100; particles.push({cx,cy,dx:Math.cos(a)*spd,dy:Math.sin(a)*spd,bt:performance.now()/1000,life:0.35+Math.random()*0.35,color,size:3+Math.random()*3}); }
+}
+function spawnPopup(gx,gy,text,color){ popups.push({cx:gx*CELL+CELL/2,cy:gy*CELL+CELL/2,text,color,bt:performance.now()/1000,life:0.9}); }
+
+// ============================ DRAWING ============================
+function drawBtn(x,y,w,h,text,action){
+    let hover=hovered===action, color=hover?BTN_HOVER:BTN_BG, bd=hover?BTN_BD_H:BTN_BD;
+    if(hover){ ctx.strokeStyle='#6aaa6a'; ctx.lineWidth=3; ctx.strokeRect(x-2,y-2,w+4,h+4); }
+    ctx.fillStyle=color; ctx.fillRect(x,y,w,h); ctx.strokeStyle=bd; ctx.lineWidth=2; ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle=hover?'#fff':'#ddd'; ctx.font='bold 15px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(text,x+w/2,y+h/2); buttons.push({x1:x,y1:y,x2:x+w,y2:y+h,action});
+}
+
+function drawPixelSnake(){
+    let ps=10, thick=4;
+    function line(c1,r1,c2,r2){ let p=[]; if(c1===c2){ let s=r2>=r1?1:-1; for(let r=r1;s>0?r<=r2:r>=r2;r+=s)p.push([c1,r]); }else{ let s=c2>=c1?1:-1; for(let c=c1;s>0?c<=c2:c>=c2;c+=s)p.push([c,r1]); } return p; }
+    let segs=[[0,52,60,52],[60,52,60,44],[60,44,6,44],[6,44,6,36],[6,36,58,36],[58,36,58,28],[58,28,10,28],[10,28,10,20],[10,20,56,20],[56,20,56,12],[56,12,14,12],[14,12,14,6],[14,6,20,6]];
+    let cl=[]; for(let[s1,r1,s2,r2]of segs){ let sp=line(s1,r1,s2,r2); if(cl.length&&sp.length&&sp[0][0]===cl[cl.length-1][0]&&sp[0][1]===cl[cl.length-1][1])cl.push(...sp.slice(1)); else cl.push(...sp); }
+    let filled=new Set(), half=Math.floor(thick/2);
+    for(let[c,r]of cl){ for(let dc=-half;dc<=half;dc++)for(let dr=-half;dr<=half;dr++)filled.add((c+dc)+','+(r+dr)); }
+    let ox=18, oy=20;
+    for(let s of filled){ let[c,r]=s.split(',').map(Number); ctx.fillStyle=(c+r)%3===0?'#0d1f0d':'#0a1a0a'; ctx.fillRect(ox+c*ps,oy+r*ps,ps,ps); }
+    let[hc,hr]=cl[cl.length-1];
+    ctx.fillStyle='#0f2a0f'; for(let dc=-2;dc<=3;dc++)for(let dr=-2;dr<=2;dr++)ctx.fillRect(ox+(hc+dc)*ps,oy+(hr+dr)*ps,ps,ps);
+    let hx=ox+(hc+2)*ps, hy2=oy+(hr-1)*ps;
+    ctx.fillStyle='#1a4a1a'; ctx.beginPath();ctx.arc(hx+4,hy2+3,2.5,0,Math.PI*2);ctx.fill(); ctx.beginPath();ctx.arc(hx+10,hy2+3,2.5,0,Math.PI*2);ctx.fill();
+}
+
+function draw(){
+    ctx.clearRect(0,0,CW,CH); buttons=[];
+    let sx=0,sy=0;
+    if(performance.now()/1000<shakeUntil){ let e=performance.now()/1000-(shakeUntil-0.4), int=Math.max(0,1-e/0.4); sx=Math.floor((Math.random()*2-1)*10*int); sy=Math.floor((Math.random()*2-1)*10*int); }
+
+    if(state==='menu')drawMenu(); else if(state==='rules')drawRules(); else if(state==='history')drawHistory();
+    else if(state==='skins')drawSkins(); else if(state==='play'||state==='over'||state==='countdown'){ drawGame(sx,sy); drawParticles(sx,sy); drawPopups(sx,sy);
+        if(state==='over')drawGameoverOverlay(); else if(state==='countdown')drawCountdownOverlay(); else if(paused)drawPauseOverlay();
+    }
+}
+
+function drawCountdownOverlay(){
+    ctx.fillStyle=OVERLAY; ctx.globalAlpha=0.5; ctx.fillRect(0,0,CW,CH); ctx.globalAlpha=1;
+    let text=countdown>0?String(countdown):'GO!', elapsed=performance.now()/1000-countdownTimer, scale=1+0.3*Math.sin(elapsed*8);
+    let fs=Math.floor(72*scale), r=Math.floor(0xcc*(1+0.3*(1-scale))), g=Math.floor(0x33*(1-(1-scale)));
+    ctx.fillStyle=`rgb(${Math.min(255,r)},${Math.min(255,g)},51)`; ctx.font=`bold ${fs}px "Microsoft YaHei",sans-serif`;
+    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(text,CW/2,CH/2);
+}
+function drawPauseOverlay(){
+    ctx.fillStyle=OVERLAY; ctx.globalAlpha=0.5; ctx.fillRect(0,0,CW,CH); ctx.globalAlpha=1;
+    ctx.fillStyle='#555'; ctx.font='bold 36px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.fillText('已暂停',CW/2,CH/2-20);
+    ctx.fillStyle='#888'; ctx.font='18px "Microsoft YaHei",sans-serif'; ctx.fillText('按 P 继续',CW/2,CH/2+30);
+}
+
+function drawMenu(){
+    canvas.style.background=MENU_BG; ctx.fillStyle=MENU_BG; ctx.fillRect(0,0,CW,CH); drawPixelSnake();
+    ctx.fillStyle=TEXT; ctx.font='bold 54px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.fillText('贪吃蛇',CW/2,100);
+    ctx.fillStyle=SUBTEXT; ctx.font='18px Consolas,monospace'; ctx.fillText('SNAKE',CW/2,155);
+    let bw=240,bh=44,bx=CW/2-bw/2;
+    drawBtn(bx,220,bw,bh,'开始游戏','start'); drawBtn(bx,274,bw,bh,'规则说明','rules');
+    drawBtn(bx,328,bw,bh,'历史成绩','history'); drawBtn(bx,382,bw,bh,'选择皮肤','skins');
+    drawBtn(bx,436,115,bh,'昵称','nickname'); drawBtn(bx+125,436,115,bh,'退出游戏','quit');
+}
+function drawRules(){
+    canvas.style.background=MENU_BG; ctx.fillStyle=MENU_BG; ctx.fillRect(0,0,CW,CH);
+    let items=[['游戏规则','bold 28px "Microsoft YaHei",sans-serif',TEXT],['','',''],['↑↓←→ / WASD  控制蛇的移动','18px "Microsoft YaHei",sans-serif','#ccc'],['P  暂停/继续','16px "Microsoft YaHei",sans-serif','#888'],['吃到食物得分，蛇身变长','18px "Microsoft YaHei",sans-serif','#ccc'],['每吃 3 个食物速度提升一级','18px "Microsoft YaHei",sans-serif','#ccc'],['连续吃食物获得连击加分','17px "Microsoft YaHei",sans-serif','#fa0'],['速度等级 ≥3 出现障碍物','17px "Microsoft YaHei",sans-serif','#f44'],['警惕敌方 AI 蛇!','17px "Microsoft YaHei",sans-serif','#f64'],['','',''],['特殊食物：','bold 20px "Microsoft YaHei",sans-serif',TEXT],['','',''],['● 金色大果  +30 分','17px "Microsoft YaHei",sans-serif','#ffd700'],['◆ 蓝色护盾  免死一次','17px "Microsoft YaHei",sans-serif','#44aaff'],['★ 紫色无敌  5秒穿墙','17px "Microsoft YaHei",sans-serif','#c4f'],['','',''],['按住空格键临时加速','16px "Microsoft YaHei",sans-serif','#888'],['按 M 键切换静音','16px "Microsoft YaHei",sans-serif','#888'],['','',''],['点击任意位置返回','13px "Microsoft YaHei",sans-serif','#666']];
+    ctx.textAlign='center'; let y=80;
+    for(let[t,f,c]of items){ if(t){ ctx.fillStyle=c; ctx.font=f; ctx.fillText(t,CW/2,y); } y+=28; }
+}
+function drawSkins(){
+    canvas.style.background=MENU_BG; ctx.fillStyle=MENU_BG; ctx.fillRect(0,0,CW,CH);
+    ctx.fillStyle=TEXT; ctx.font='bold 28px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.fillText('选择皮肤',CW/2,65);
+    let skinsList=Object.keys(SKINS), bw=260, bh=44, bx=CW/2-bw/2, y=120;
+    for(let name of skinsList){
+        let s=SKINS[name], color=hovered==='skin_'+name?BTN_HOVER:BTN_BG, bd=hovered==='skin_'+name?BTN_BD_H:BTN_BD;
+        if(hovered==='skin_'+name){ ctx.strokeStyle='#6aaa6a'; ctx.lineWidth=2; ctx.strokeRect(bx,y,bw,bh); }
+        ctx.fillStyle=color; ctx.fillRect(bx,y,bw,bh); ctx.strokeStyle=bd; ctx.lineWidth=2; ctx.strokeRect(bx,y,bw,bh);
+        ctx.fillStyle=s.head; ctx.beginPath();ctx.arc(bx+25,y+22,10,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=s.tail; ctx.beginPath();ctx.arc(bx+45,y+22,10,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=hovered==='skin_'+name?'#fff':'#ddd'; ctx.font='bold 15px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+        ctx.fillText(name+(skin===name?' ✓':''),bx+130,y+bh/2);
+        buttons.push({x1:bx,y1:y,x2:bx+bw,y2:y+bh,action:'skin_'+name}); y+=55;
+    }
+    drawBtn(CW/2-90,CH-90,180,44,'返回','back');
+}
+function drawHistory(){
+    canvas.style.background=MENU_BG; ctx.fillStyle=MENU_BG; ctx.fillRect(0,0,CW,CH);
+    ctx.fillStyle=TEXT; ctx.font='bold 28px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.fillText('历史成绩',CW/2,50);
+    let h=loadHistory();
+    if(h.length===0){ ctx.fillStyle='#666'; ctx.font='20px "Microsoft YaHei",sans-serif'; ctx.fillText('暂无成绩',CW/2,CH/2); }
+    else {
+        // header
+        ctx.fillStyle='#888'; ctx.font='bold 12px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+        ctx.fillText('排名',CW/2-240,105); ctx.fillText('玩家',CW/2-130,105);
+        ctx.fillText('分数',CW/2+10,105); ctx.fillText('等级',CW/2+120,105); ctx.fillText('日期',CW/2+235,105);
+        ctx.fillText('操作',CW/2+320,105);
+        ctx.strokeStyle='#333'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(10,118); ctx.lineTo(CW-10,118); ctx.stroke();
+        let y=145, icons=['❶','❷','❸'], colors=['#ffd700','#c0c0c0','#cd853f'];
+        for(let i=0;i<Math.min(h.length,10);i++){
+            let e=h[i], icon=i<3?icons[i]:String(i+1), player=(e.player||'玩家').substring(0,6);
+            let fill=i<3?colors[i]:'#999';
+            ctx.fillStyle=fill; ctx.font='bold 16px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+            ctx.fillText(icon,CW/2-240,y); ctx.fillText(player,CW/2-130,y);
+            ctx.fillText(String(e.score),CW/2+10,y); ctx.fillText('Lv.'+e.level,CW/2+120,y);
+            ctx.fillText(e.date,CW/2+235,y);
+            // delete button
+            let dbx=CW/2+320-24, dby=y-13, dbw=48, dbh=26, dHover=hovered==='del_'+i;
+            ctx.fillStyle=dHover?'#522':'#2a1a1a'; ctx.fillRect(dbx,dby,dbw,dbh);
+            ctx.strokeStyle=dHover?'#844':'#533'; ctx.lineWidth=1; ctx.strokeRect(dbx,dby,dbw,dbh);
+            ctx.fillStyle=dHover?'#f66':'#c66'; ctx.font='10px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillText('删除',dbx+dbw/2,dby+dbh/2);
+            buttons.push({x1:dbx,y1:dby,x2:dbx+dbw,y2:dby+dbh,action:'del_'+i});
+            y+=32;
+        }
+    }
+    drawBtn(CW/2-90,CH-90,180,44,'返回','back');
+}
+
+function drawGame(sx,sy){
+    canvas.style.background=BG; ctx.fillStyle=BG; ctx.fillRect(0,0,CW,CH);
+    ctx.strokeStyle=GRID; ctx.lineWidth=1;
+    for(let x=0;x<=CW;x+=CELL){ ctx.beginPath();ctx.moveTo(x+sx,0+sy);ctx.lineTo(x+sx,CH+sy);ctx.stroke(); }
+    for(let y=0;y<=CH;y+=CELL){ ctx.beginPath();ctx.moveTo(0+sx,y+sy);ctx.lineTo(CW+sx,y+sy);ctx.stroke(); }
+    // obstacles
+    for(let key of obstacles){ let[ox,oy]=key.split(',').map(Number); ctx.fillStyle='#aa2222'; ctx.fillRect(ox*CELL+4+sx,oy*CELL+4+sy,CELL-8,CELL-8); ctx.strokeStyle='#cc4444'; ctx.lineWidth=2; ctx.strokeRect(ox*CELL+4+sx,oy*CELL+4+sy,CELL-8,CELL-8); }
+    // boost trail
+    if(boost&&state==='play'){ let[, , accent]=skinColors(), ar=parseInt(accent.substr(1,2),16), ag=parseInt(accent.substr(3,2),16), ab=parseInt(accent.substr(5,2),16); for(let j=0;j<trail.length;j++){ let[tx,ty]=trail[j], alpha=(j+1)/(trail.length+1), pad=2+Math.floor(8*(1-alpha)), r=Math.floor(0xFF+alpha*(ar-0xFF)), g=Math.floor(0xF8+alpha*(ag-0xF8)), b=Math.floor(0xE7+alpha*(ab-0xE7)); ctx.fillStyle=`rgb(${r},${g},${b})`; ctx.fillRect(tx*CELL+pad+sx,ty*CELL+pad+sy,CELL-2*pad,CELL-2*pad); } }
+    // foods
+    for(let[fx,fy,ftype]of foods) drawOneFood(fx,fy,ftype,sx,sy);
+    drawSnake(Date.now()/1000<invincibleUntil,sx,sy); drawEnemy(sx,sy);
+}
+function drawOneFood(fx,fy,ftype,sx=0,sy=0){
+    let cx=fx*CELL+CELL/2+sx, cy=fy*CELL+CELL/2+sy, glow=GLOW_COLORS[ftype], fill=FOOD_COLORS[ftype];
+    let breathe=1+0.12*Math.sin(Date.now()/1000*3.5), glowR=(CELL/2+4)*breathe;
+    ctx.strokeStyle=glow; ctx.lineWidth=2; ctx.beginPath();ctx.arc(cx,cy,glowR,0,Math.PI*2);ctx.stroke();
+    if(ftype==='star')drawStar(cx,cy,(CELL/2-2)*breathe,fill);
+    else if(ftype==='shield'){ let r=(CELL/2-3)*breathe; ctx.fillStyle=fill; ctx.beginPath();ctx.moveTo(cx,cy-r);ctx.lineTo(cx+r,cy);ctx.lineTo(cx,cy+r);ctx.lineTo(cx-r,cy);ctx.closePath();ctx.fill(); }
+    else { let r=(CELL/2-(ftype==='big'?1:3))*breathe; ctx.fillStyle=fill; ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill(); }
+}
+function drawStar(cx,cy,r,color){
+    ctx.fillStyle=color; ctx.beginPath();
+    for(let i=0;i<10;i++){ let a=Math.PI/2+i*Math.PI/5, d=i%2===0?r:r*0.4; i===0?ctx.moveTo(cx+d*Math.cos(a),cy-d*Math.sin(a)):ctx.lineTo(cx+d*Math.cos(a),cy-d*Math.sin(a)); }
+    ctx.closePath();ctx.fill();
+}
+function drawSnake(inv,sx=0,sy=0){
+    let[headC,tailC]=skinColors(), n=snake.length;
+    for(let i=0;i<n;i++){
+        let[ssx,ssy]=snake[i], x1=ssx*CELL+2+sx, y1=ssy*CELL+2+sy, x2=(ssx+1)*CELL-2+sx, y2=(ssy+1)*CELL-2+sy;
+        let t=n>1?i/(n-1):1;
+        let tr=Math.floor(parseInt(tailC.substr(1,2),16)+t*(parseInt(headC.substr(1,2),16)-parseInt(tailC.substr(1,2),16)));
+        let tg=Math.floor(parseInt(tailC.substr(3,2),16)+t*(parseInt(headC.substr(3,2),16)-parseInt(tailC.substr(3,2),16)));
+        let tb=Math.floor(parseInt(tailC.substr(5,2),16)+t*(parseInt(headC.substr(5,2),16)-parseInt(tailC.substr(5,2),16)));
+        let color=`rgb(${tr},${tg},${tb})`; if(inv&&Math.floor(Date.now()/1000*6)%2===0)color='#ff6600';
+        ctx.fillStyle=color;
+        ctx.beginPath(); ctx.ellipse((x1+x2)/2,(y1+y2)/2,(x2-x1)/2,(y2-y1)/2,0,0,Math.PI*2); ctx.fill();
+    }
+    let[hx,hy]=snake[n-1]; drawEyes(hx,hy,sx,sy);
+}
+function drawEyes(hx,hy,sx,sy){
+    let[dx,dy]=dir, ccx=hx*CELL+CELL/2+sx, ccy=hy*CELL+CELL/2+sy, eyes, pups;
+    if(dx===1){ eyes=[[4,-5],[4,5]]; pups=[[8,-5],[8,5]]; }
+    else if(dx===-1){ eyes=[[-4,-5],[-4,5]]; pups=[[-8,-5],[-8,5]]; }
+    else if(dy===-1){ eyes=[[-5,-4],[5,-4]]; pups=[[-5,-8],[5,-8]]; }
+    else { eyes=[[-5,4],[5,4]]; pups=[[-5,8],[5,8]]; }
+    ctx.fillStyle='#fff'; for(let[ex,ey]of eyes){ ctx.beginPath();ctx.arc(ccx+ex,ccy+ey,3,0,Math.PI*2);ctx.fill(); }
+    ctx.fillStyle='#000'; for(let[px,py]of pups){ ctx.beginPath();ctx.arc(ccx+px,ccy+py,1.5,0,Math.PI*2);ctx.fill(); }
+}
+function drawEnemy(sx,sy){
+    if(enemy.length===0)return; let n=enemy.length;
+    for(let i=0;i<n;i++){
+        let[ex,ey]=enemy[i], x1=ex*CELL+3+sx, y1=ey*CELL+3+sy, x2=(ex+1)*CELL-3+sx, y2=(ey+1)*CELL-3+sy;
+        let t=n>1?i/(n-1):1, r=Math.floor(0x66+t*(0xdd-0x66)), g=Math.floor(0x22+t*(0x66-0x22)), b=Math.floor(0x22+t*(0x44-0x22));
+        ctx.fillStyle=`rgb(${r},${g},${b})`; ctx.beginPath();ctx.ellipse((x1+x2)/2,(y1+y2)/2,(x2-x1)/2,(y2-y1)/2,0,0,Math.PI*2);ctx.fill();
+    }
+    let[ehx,ehy]=enemy[n-1], ecx=ehx*CELL+CELL/2+sx, ecy=ehy*CELL+CELL/2+sy, [edx,edy]=enemyDir, eeyes, epups;
+    if(edx===1){ eeyes=[[4,-4],[4,4]]; epups=[[7,-4],[7,4]]; }
+    else if(edx===-1){ eeyes=[[-4,-4],[-4,4]]; epups=[[-7,-4],[-7,4]]; }
+    else if(edy===-1){ eeyes=[[-4,-4],[4,-4]]; epups=[[-4,-7],[4,-7]]; }
+    else { eeyes=[[-4,4],[4,4]]; epups=[[-4,7],[4,7]]; }
+    ctx.fillStyle='#fff'; for(let[ex,ey]of eeyes){ ctx.beginPath();ctx.arc(ecx+ex,ecy+ey,2,0,Math.PI*2);ctx.fill(); }
+    ctx.fillStyle='#000'; for(let[px,py]of epups){ ctx.beginPath();ctx.arc(ecx+px,ecy+py,1,0,Math.PI*2);ctx.fill(); }
+}
+
+function drawParticles(sx,sy){
+    let now=performance.now()/1000, alive=[];
+    for(let p of particles){ let e=now-p.bt; if(e>=p.life)continue; let a=1-e/p.life, cx=p.cx+p.dx*e+sx, cy=p.cy+p.dy*e+0.5*200*e*e+sy, s=Math.max(1,p.size*a); ctx.fillStyle=p.color; ctx.beginPath();ctx.arc(cx,cy,s,0,Math.PI*2);ctx.fill(); alive.push(p); }
+    particles=alive;
+}
+function drawPopups(sx,sy){
+    let now=performance.now()/1000, alive=[];
+    for(let p of popups){ let e=now-p.bt; if(e>=p.life)continue; ctx.fillStyle=p.color; ctx.font='bold 16px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.fillText(p.text,p.cx+sx,p.cy-40*e+sy); alive.push(p); }
+    popups=alive;
+}
+function drawGameoverOverlay(){
+    ctx.fillStyle=OVERLAY; ctx.globalAlpha=0.7; ctx.fillRect(0,0,CW,CH); ctx.globalAlpha=1;
+    ctx.strokeStyle='#ff3366'; ctx.lineWidth=4; ctx.strokeRect(2,2,CW-4,CH-4);
+    ctx.fillStyle='#cc0033'; ctx.font='bold 38px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.fillText('游戏结束',CW/2,CH/2-80);
+    ctx.fillStyle='#555'; ctx.font='17px "Microsoft YaHei",sans-serif'; ctx.fillText(`分数: ${score}   速度: 等级 ${speedLevel()}`,CW/2,CH/2-25);
+    let bw=220,bh=48,bx=CW/2-bw/2; drawBtn(bx,CH/2+30,bw,bh,'重新开始 (R)','restart'); drawBtn(bx,CH/2+90,bw,bh,'返回主菜单','menu');
+}
+
+// ============================ GAME LOOP ============================
+function gameLoop(ts){
+    let delay=(boost&&state==='play'&&!paused)?speed/2:speed;
+    if(!lastTick)lastTick=ts;
+    if(state==='countdown'){
+        if(ts/1000-countdownTimer>=0.7){ countdown--; countdownTimer=ts/1000; if(countdown<0){ state='play'; } }
+        syncInfo(); draw(); requestAnimationFrame(gameLoop); return;
+    }
+    let elapsed=ts-lastTick;
+    if(elapsed>=delay){ lastTick=ts-(elapsed%delay); if(state==='play'&&!paused)update(); syncInfo(); }
+    draw(); requestAnimationFrame(gameLoop);
+}
+
+// ============================ INIT ============================
+skin='经典绿'; nickname='';
+initData(); foods=[placeOneFood()]; syncInfo(); draw(); startBGM(); requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
