@@ -23,9 +23,12 @@ canvas { display: block; border: 1px solid #333; max-width: 100%; height: auto; 
 #panel .lives { color: #44aaff; }
 #panel .inv { color: #cc44ff; min-height: 16px; }
 #panel .skin-info { color: #888; font-size: 10px; }
+#boost-btn { display: none; position: fixed; bottom: 58px; left: 14px; width: 80px; height: 80px; border-radius: 50%; background: rgba(255,102,0,0.28); border: 2.5px solid rgba(255,102,0,0.5); color: rgba(255,255,255,0.9); font-size: 17px; font-weight: bold; font-family: "Microsoft YaHei","PingFang SC",sans-serif; z-index: 10; touch-action: none; cursor: pointer; justify-content: center; align-items: center; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; outline: none; }
+#boost-btn:active, #boost-btn.pressed { background: rgba(255,102,0,0.7); border-color: #ff6600; transform: scale(0.95); }
 
 /* Mobile responsive -- portrait-first, max canvas size */
 @media (max-width: 960px) {
+    #boost-btn { display: flex; }
     body { align-items: center; background: #050505; }
     #container { flex-direction: column; align-items: center; padding: 0; gap: 0; justify-content: center; height: 100dvh; }
     canvas { width: 100vw; height: auto; max-width: 750px; border: none; border-radius: 0; }
@@ -42,6 +45,7 @@ canvas { display: block; border: 1px solid #333; max-width: 100%; height: auto; 
 <body>
 <div id="container">
     <canvas id="game"></canvas>
+    <button id="boost-btn">加速</button>
     <div id="panel">
         <div class="title">贪吃蛇</div>
         <div class="info score" id="score">分数: 0</div>
@@ -180,54 +184,38 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('keyup',e=>{ if(e.key===' '){ boost=false; spaceHeld=false; } });
 
 // ============================ MOBILE TOUCH CONTROLS ============================
-// Multi-touch: first finger = steering, second finger = instant boost
-let touchWasSwipe=false, isBoostFromTouch=false, lastSteerPos=null, spaceHeld=false, steerFingerId=null, boostFingerId=null;
+// Swipe anywhere on canvas = steer; dedicated boost button handles acceleration
+let touchWasSwipe=false, isBoostFromTouch=false, lastSteerPos=null, spaceHeld=false;
 
 canvas.addEventListener('touchstart',e=>{
     initAudio(); touchWasSwipe=false;
-    for(let t of e.changedTouches){
-        if(steerFingerId===null){
-            steerFingerId=t.identifier;
-            lastSteerPos={x:t.clientX, y:t.clientY};
-        }else if(boostFingerId===null){
-            boostFingerId=t.identifier;
-            if(state==='play'&&!paused){ boost=true; isBoostFromTouch=true; }
-        }
+    if(e.touches.length===1){
+        lastSteerPos={x:e.touches[0].clientX, y:e.touches[0].clientY};
     }
 },{passive:false});
 
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
-    for(let t of e.changedTouches){
-        if(t.identifier===steerFingerId){
-            touchWasSwipe=true;
-            if(state==='play'&&!paused){
-                let sdx=t.clientX-lastSteerPos.x, sdy=t.clientY-lastSteerPos.y;
-                if(Math.abs(sdx)>20||Math.abs(sdy)>20){
-                    if(Math.abs(sdx)>Math.abs(sdy))steer(sdx>0?'ArrowRight':'ArrowLeft');
-                    else steer(sdy>0?'ArrowDown':'ArrowUp');
-                    lastSteerPos={x:t.clientX, y:t.clientY};
-                }
-            }
+    if(!lastSteerPos||e.touches.length!==1)return;
+    touchWasSwipe=true;
+    if(state==='play'&&!paused){
+        let sdx=e.touches[0].clientX-lastSteerPos.x, sdy=e.touches[0].clientY-lastSteerPos.y;
+        if(Math.abs(sdx)>20||Math.abs(sdy)>20){
+            if(Math.abs(sdx)>Math.abs(sdy))steer(sdx>0?'ArrowRight':'ArrowLeft');
+            else steer(sdy>0?'ArrowDown':'ArrowUp');
+            lastSteerPos={x:e.touches[0].clientX, y:e.touches[0].clientY};
         }
     }
 },{passive:false});
 
-canvas.addEventListener('touchend',e=>{
-    for(let t of e.changedTouches){
-        if(t.identifier===steerFingerId) steerFingerId=null;
-        if(t.identifier===boostFingerId){ boostFingerId=null; if(!spaceHeld){ boost=false; isBoostFromTouch=false; } }
-    }
-    if(e.touches.length===0) lastSteerPos=null;
-});
+canvas.addEventListener('touchend',e=>{ lastSteerPos=null; });
+canvas.addEventListener('touchcancel',e=>{ lastSteerPos=null; });
 
-canvas.addEventListener('touchcancel',e=>{
-    for(let t of e.changedTouches){
-        if(t.identifier===steerFingerId) steerFingerId=null;
-        if(t.identifier===boostFingerId){ boostFingerId=null; boost=false; isBoostFromTouch=false; }
-    }
-    if(e.touches.length===0) lastSteerPos=null;
-});
+// Dedicated boost button
+const boostBtn=document.getElementById('boost-btn');
+boostBtn.addEventListener('pointerdown',e=>{ e.preventDefault(); if(state==='play'&&!paused){ boost=true; isBoostFromTouch=true; } });
+boostBtn.addEventListener('pointerup',e=>{ if(isBoostFromTouch&&!spaceHeld){ boost=false; isBoostFromTouch=false; } });
+boostBtn.addEventListener('pointerleave',e=>{ if(isBoostFromTouch&&!spaceHeld){ boost=false; isBoostFromTouch=false; } });
 
 // Canvas click (works for both mouse and touch)
 canvas.addEventListener('click',e=>{
@@ -425,7 +413,7 @@ function drawMenu(){
 }
 function drawRules(){
     canvas.style.background=MENU_BG; ctx.fillStyle=MENU_BG; ctx.fillRect(0,0,CW,CH);
-    let items=[['游戏规则','bold 28px "Microsoft YaHei",sans-serif',TEXT],['','',''],['滑动屏幕  控制蛇的方向','18px "Microsoft YaHei",sans-serif','#ccc'],['第二根手指按下  临时加速','18px "Microsoft YaHei",sans-serif','#ccc'],['吃到食物得分，蛇身变长','18px "Microsoft YaHei",sans-serif','#ccc'],['每吃 3 个食物速度提升一级','18px "Microsoft YaHei",sans-serif','#ccc'],['连续吃食物获得连击加分','17px "Microsoft YaHei",sans-serif','#fa0'],['速度等级 ≥3 出现障碍物','17px "Microsoft YaHei",sans-serif','#f44'],['警惕敌方 AI 蛇!','17px "Microsoft YaHei",sans-serif','#f64'],['','',''],['特殊食物：','bold 20px "Microsoft YaHei",sans-serif',TEXT],['','',''],['● 金色大果  +30 分','17px "Microsoft YaHei",sans-serif','#ffd700'],['◆ 蓝色护盾  免死一次','17px "Microsoft YaHei",sans-serif','#44aaff'],['★ 紫色无敌  5秒穿墙','17px "Microsoft YaHei",sans-serif','#c4f'],['','',''],['双指同时触屏即可','16px "Microsoft YaHei",sans-serif','#888'],['同时加速与转向','16px "Microsoft YaHei",sans-serif','#888'],['','',''],['点击任意位置返回','13px "Microsoft YaHei",sans-serif','#666']];
+    let items=[['游戏规则','bold 28px "Microsoft YaHei",sans-serif',TEXT],['','',''],['滑动屏幕  控制蛇的方向','18px "Microsoft YaHei",sans-serif','#ccc'],['按住左下角按钮  临时加速','18px "Microsoft YaHei",sans-serif','#ccc'],['吃到食物得分，蛇身变长','18px "Microsoft YaHei",sans-serif','#ccc'],['每吃 3 个食物速度提升一级','18px "Microsoft YaHei",sans-serif','#ccc'],['连续吃食物获得连击加分','17px "Microsoft YaHei",sans-serif','#fa0'],['速度等级 ≥3 出现障碍物','17px "Microsoft YaHei",sans-serif','#f44'],['警惕敌方 AI 蛇!','17px "Microsoft YaHei",sans-serif','#f64'],['','',''],['特殊食物：','bold 20px "Microsoft YaHei",sans-serif',TEXT],['','',''],['● 金色大果  +30 分','17px "Microsoft YaHei",sans-serif','#ffd700'],['◆ 蓝色护盾  免死一次','17px "Microsoft YaHei",sans-serif','#44aaff'],['★ 紫色无敌  5秒穿墙','17px "Microsoft YaHei",sans-serif','#c4f'],['','',''],['加速时滑动屏幕','16px "Microsoft YaHei",sans-serif','#888'],['可同时加速与转向','16px "Microsoft YaHei",sans-serif','#888'],['','',''],['点击任意位置返回','13px "Microsoft YaHei",sans-serif','#666']];
     ctx.textAlign='center'; let y=80;
     for(let[t,f,c]of items){ if(t){ ctx.fillStyle=c; ctx.font=f; ctx.fillText(t,CW/2,y); } y+=28; }
 }
@@ -490,7 +478,6 @@ function drawGame(sx,sy){
     // foods
     for(let[fx,fy,ftype]of foods) drawOneFood(fx,fy,ftype,sx,sy);
     drawSnake(Date.now()/1000<invincibleUntil,sx,sy); drawEnemy(sx,sy);
-    if(state==='play'){ ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.font='10px "Microsoft YaHei",sans-serif'; ctx.textAlign='left'; ctx.fillText('滑动转向',6,CH-6); ctx.textAlign='right'; ctx.fillText('双指加速',CW-6,CH-6); }
 }
 function drawOneFood(fx,fy,ftype,sx=0,sy=0){
     let cx=fx*CELL+CELL/2+sx, cy=fy*CELL+CELL/2+sy, glow=GLOW_COLORS[ftype], fill=FOOD_COLORS[ftype];
