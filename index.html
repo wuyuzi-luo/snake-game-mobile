@@ -23,17 +23,19 @@ canvas { display: block; border: 1px solid #333; max-width: 100%; height: auto; 
 #panel .lives { color: #44aaff; }
 #panel .inv { color: #cc44ff; min-height: 16px; }
 #panel .skin-info { color: #888; font-size: 10px; }
+#panel .warning { color: #ff3333; font-size: 15px; font-weight: bold; min-height: 20px; }
 
 /* Mobile responsive -- portrait-first, max canvas size */
 @media (max-width: 960px) {
     body { align-items: center; background: #050505; }
     #container { flex-direction: column; align-items: center; padding: 0; gap: 0; justify-content: center; height: 100dvh; }
     canvas { width: 100vw; height: auto; max-width: 750px; border: none; border-radius: 0; }
-    #panel { width: 100vw; max-width: 750px; min-width: auto; flex-direction: row; flex-wrap: nowrap; padding: 6px 14px; gap: 0; justify-content: space-between; align-items: center; background: #0d0d0d; border-top: 1px solid #1a1a1a; min-height: 42px; }
+    #panel { width: 100vw; max-width: 750px; min-width: auto; flex-direction: row; flex-wrap: wrap; padding: 6px 14px; gap: 0; justify-content: space-between; align-items: center; background: #0d0d0d; border-top: 1px solid #1a1a1a; min-height: 42px; }
     #panel .title { font-size: 15px; margin-bottom: 0; color: #bbb; }
     #panel .info { font-size: 11px; padding: 0; }
     #panel .boost, #panel .combo, #panel .inv, #panel .skin-info { display: none; }
     #panel .progress { font-size: 10px; opacity: 0.7; }
+    #panel .warning { width: 100%; text-align: center; font-size: 15px; padding: 4px 0 2px; }
 }
 
 
@@ -47,6 +49,7 @@ canvas { display: block; border: 1px solid #333; max-width: 100%; height: auto; 
         <div class="info score" id="score">分数: 0</div>
         <div class="info speed" id="speed">速度: 等级 1</div>
         <div class="info progress" id="progress">进度: [░░░] 0/3</div>
+        <div class="info warning" id="warning">⚠ 不能同时切换方向与加速</div>
         <div class="info boost" id="boost"></div>
         <div class="info combo" id="combo"></div>
         <div class="info lives" id="lives"></div>
@@ -158,6 +161,7 @@ function syncInfo(){
     if(state==='play'&&Date.now()/1000<invincibleUntil) document.getElementById('inv').textContent=`无敌: ${Math.ceil(invincibleUntil-Date.now()/1000)}秒`;
     else document.getElementById('inv').textContent='';
     document.getElementById('skinInfo').textContent=`皮肤: ${skin}`;
+    document.getElementById('warning').style.display=(state==='play')?'block':'none';
 }
 
 // ============================ INPUT ============================
@@ -481,7 +485,6 @@ function drawGame(sx,sy){
     // foods
     for(let[fx,fy,ftype]of foods) drawOneFood(fx,fy,ftype,sx,sy);
     drawSnake(Date.now()/1000<invincibleUntil,sx,sy); drawEnemy(sx,sy);
-    if(state==='play'){ ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.font='bold 12px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.fillText('⚠ 不能同时切换方向与加速',CW/2,CH-8); }
 }
 function drawOneFood(fx,fy,ftype,sx=0,sy=0){
     let cx=fx*CELL+CELL/2+sx, cy=fy*CELL+CELL/2+sy, glow=GLOW_COLORS[ftype], fill=FOOD_COLORS[ftype];
