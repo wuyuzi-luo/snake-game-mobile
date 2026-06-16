@@ -180,30 +180,39 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('keyup',e=>{ if(e.key===' '){ boost=false; spaceHeld=false; } });
 
 // ============================ MOBILE TOUCH CONTROLS ============================
-let touchStartPos=null, touchStartTime=0, touchWasSwipe=false, longPressTimer=null, isBoostFromTouch=false, lastSteerPos=null, spaceHeld=false;
+let touchStartPos=null, touchStartTime=0, touchWasSwipe=false, longPressTimer=null, isBoostFromTouch=false, lastSteerPos=null, spaceHeld=false, touchZone=null;
 
 // Touch: long-press boost + continuous swipe steering
 canvas.addEventListener('touchstart',e=>{
     initAudio(); touchWasSwipe=false;
     if(e.touches.length===1){
         touchStartPos={x:e.touches[0].clientX, y:e.touches[0].clientY};
-        lastSteerPos={x:touchStartPos.x, y:touchStartPos.y};
-        if(longPressTimer)clearTimeout(longPressTimer);
-        longPressTimer=setTimeout(()=>{ if(state==='play'&&!paused){ boost=true; isBoostFromTouch=true; } },200);
+        let rect=canvas.getBoundingClientRect();
+        touchZone=e.touches[0].clientX-rect.left<rect.width/2?'left':'right';
+        if(touchZone==='left'){
+            if(longPressTimer)clearTimeout(longPressTimer);
+            longPressTimer=setTimeout(()=>{ if(state==='play'&&!paused){ boost=true; isBoostFromTouch=true; } },200);
+        }else{
+            lastSteerPos={x:touchStartPos.x, y:touchStartPos.y};
+        }
     }
 },{passive:false});
 
 canvas.addEventListener('touchmove',e=>{
     e.preventDefault();
     if(!touchStartPos||e.touches.length!==1)return;
-    let dx=e.touches[0].clientX-touchStartPos.x, dy=e.touches[0].clientY-touchStartPos.y;
-    if(Math.abs(dx)>10||Math.abs(dy)>10){ if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; } touchWasSwipe=true; }
-    if(state==='play'&&!paused){
-        let sdx=e.touches[0].clientX-lastSteerPos.x, sdy=e.touches[0].clientY-lastSteerPos.y;
-        if(Math.abs(sdx)>20||Math.abs(sdy)>20){
-            if(Math.abs(sdx)>Math.abs(sdy))steer(sdx>0?'ArrowRight':'ArrowLeft');
-            else steer(sdy>0?'ArrowDown':'ArrowUp');
-            lastSteerPos={x:e.touches[0].clientX, y:e.touches[0].clientY};
+    if(touchZone==='left'){
+        let dx=e.touches[0].clientX-touchStartPos.x, dy=e.touches[0].clientY-touchStartPos.y;
+        if(Math.abs(dx)>10||Math.abs(dy)>10){ if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; } }
+    }else if(touchZone==='right'){
+        touchWasSwipe=true;
+        if(state==='play'&&!paused){
+            let sdx=e.touches[0].clientX-lastSteerPos.x, sdy=e.touches[0].clientY-lastSteerPos.y;
+            if(Math.abs(sdx)>20||Math.abs(sdy)>20){
+                if(Math.abs(sdx)>Math.abs(sdy))steer(sdx>0?'ArrowRight':'ArrowLeft');
+                else steer(sdy>0?'ArrowDown':'ArrowUp');
+                lastSteerPos={x:e.touches[0].clientX, y:e.touches[0].clientY};
+            }
         }
     }
 },{passive:false});
@@ -211,13 +220,13 @@ canvas.addEventListener('touchmove',e=>{
 canvas.addEventListener('touchend',e=>{
     if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; }
     if(isBoostFromTouch&&!spaceHeld){ boost=false; isBoostFromTouch=false; }
-    touchStartPos=null; lastSteerPos=null;
+    touchStartPos=null; lastSteerPos=null; touchZone=null;
 });
 
 canvas.addEventListener('touchcancel',e=>{
     if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; }
     if(isBoostFromTouch){ boost=false; isBoostFromTouch=false; }
-    touchStartPos=null; lastSteerPos=null;
+    touchStartPos=null; lastSteerPos=null; touchZone=null;
 });
 
 // Canvas click (works for both mouse and touch)
@@ -416,7 +425,7 @@ function drawMenu(){
 }
 function drawRules(){
     canvas.style.background=MENU_BG; ctx.fillStyle=MENU_BG; ctx.fillRect(0,0,CW,CH);
-    let items=[['游戏规则','bold 28px "Microsoft YaHei",sans-serif',TEXT],['','',''],['↑↓←→ / WASD  控制蛇的移动','18px "Microsoft YaHei",sans-serif','#ccc'],['P  暂停/继续','16px "Microsoft YaHei",sans-serif','#888'],['吃到食物得分，蛇身变长','18px "Microsoft YaHei",sans-serif','#ccc'],['每吃 3 个食物速度提升一级','18px "Microsoft YaHei",sans-serif','#ccc'],['连续吃食物获得连击加分','17px "Microsoft YaHei",sans-serif','#fa0'],['速度等级 ≥3 出现障碍物','17px "Microsoft YaHei",sans-serif','#f44'],['警惕敌方 AI 蛇!','17px "Microsoft YaHei",sans-serif','#f64'],['','',''],['特殊食物：','bold 20px "Microsoft YaHei",sans-serif',TEXT],['','',''],['● 金色大果  +30 分','17px "Microsoft YaHei",sans-serif','#ffd700'],['◆ 蓝色护盾  免死一次','17px "Microsoft YaHei",sans-serif','#44aaff'],['★ 紫色无敌  5秒穿墙','17px "Microsoft YaHei",sans-serif','#c4f'],['','',''],['按住空格键临时加速','16px "Microsoft YaHei",sans-serif','#888'],['按 M 键切换静音','16px "Microsoft YaHei",sans-serif','#888'],['','',''],['点击任意位置返回','13px "Microsoft YaHei",sans-serif','#666']];
+    let items=[['游戏规则','bold 28px "Microsoft YaHei",sans-serif',TEXT],['','',''],['滑动屏幕右侧  控制蛇的方向','18px "Microsoft YaHei",sans-serif','#ccc'],['长按屏幕左侧  临时加速','18px "Microsoft YaHei",sans-serif','#ccc'],['吃到食物得分，蛇身变长','18px "Microsoft YaHei",sans-serif','#ccc'],['每吃 3 个食物速度提升一级','18px "Microsoft YaHei",sans-serif','#ccc'],['连续吃食物获得连击加分','17px "Microsoft YaHei",sans-serif','#fa0'],['速度等级 ≥3 出现障碍物','17px "Microsoft YaHei",sans-serif','#f44'],['警惕敌方 AI 蛇!','17px "Microsoft YaHei",sans-serif','#f64'],['','',''],['特殊食物：','bold 20px "Microsoft YaHei",sans-serif',TEXT],['','',''],['● 金色大果  +30 分','17px "Microsoft YaHei",sans-serif','#ffd700'],['◆ 蓝色护盾  免死一次','17px "Microsoft YaHei",sans-serif','#44aaff'],['★ 紫色无敌  5秒穿墙','17px "Microsoft YaHei",sans-serif','#c4f'],['','',''],['左半屏加速  右半屏转向','16px "Microsoft YaHei",sans-serif','#888'],['可同时操作互不干扰','16px "Microsoft YaHei",sans-serif','#888'],['','',''],['点击任意位置返回','13px "Microsoft YaHei",sans-serif','#666']];
     ctx.textAlign='center'; let y=80;
     for(let[t,f,c]of items){ if(t){ ctx.fillStyle=c; ctx.font=f; ctx.fillText(t,CW/2,y); } y+=28; }
 }
@@ -481,6 +490,7 @@ function drawGame(sx,sy){
     // foods
     for(let[fx,fy,ftype]of foods) drawOneFood(fx,fy,ftype,sx,sy);
     drawSnake(Date.now()/1000<invincibleUntil,sx,sy); drawEnemy(sx,sy);
+    if(state==='play'){ ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.font='10px "Microsoft YaHei",sans-serif'; ctx.textAlign='left'; ctx.fillText('长按加速',6,CH-6); ctx.textAlign='right'; ctx.fillText('滑动转向',CW-6,CH-6); }
 }
 function drawOneFood(fx,fy,ftype,sx=0,sy=0){
     let cx=fx*CELL+CELL/2+sx, cy=fy*CELL+CELL/2+sy, glow=GLOW_COLORS[ftype], fill=FOOD_COLORS[ftype];
